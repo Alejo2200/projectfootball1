@@ -1,7 +1,7 @@
 import os
 import time
- 
- 
+
+
 class GameLogger:
     def __init__(self, team, unum):
         os.makedirs("logs", exist_ok=True)
@@ -14,7 +14,7 @@ class GameLogger:
         self.dash_count       = 0
         self.start_time       = time.time()
         self.f.write(f"=== {team} | Jugador #{unum} | {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
- 
+
     def log_tick(self, wm, action, state=""):
         self.total_ticks += 1
         has_ball = getattr(wm, "ball_kickable", False)
@@ -29,7 +29,7 @@ class GameLogger:
             f"ball={'SI' if has_ball else 'NO'} "
             f"stamina={wm.stamina:.0f} state={state} action={action}\n"
         )
- 
+
     def close(self):
         elapsed = time.time() - self.start_time
         pct = (100.0 * self.possession_ticks / self.total_ticks) \
