@@ -39,13 +39,11 @@ class AgentFSM:
         self.coord.update(self.unum, wm.self_pos, wm.ball_pos,
                           wm.ball_kickable, wm.ball_dist)
 
-        # Modos de pausa total
         if wm.play_mode in ("before_kick_off", "half_time",
                             "time_over", "game_over"):
             self.state = "WAIT"
             return self._go_home(wm)
 
-        # Kick-off
         if wm.play_mode in ("kick_off_l", "kick_off_r"):
             if self.unum == 11:
                 if wm.ball_kickable:
@@ -55,14 +53,12 @@ class AgentFSM:
             self.state = "WAIT"
             return self._go_home(wm)
 
-        # Balón parado
         if wm.play_mode in self.DEAD_BALL_MODES:
             return self._dead_ball(wm)
 
-        # Sin balón visible — girar buscándolo
         if wm.ball_pos is None or wm.ball_dist > 990:
             self.state = "SEARCH"
-            return {"turn": 30.0, "dash": 30.0}
+            return {"turn": 45.0, "dash": 0.0}
 
         if self.role == "goalkeeper":
             return self._goalkeeper(wm)
@@ -74,10 +70,6 @@ class AgentFSM:
             return self._forward(wm)
         return self._chase(wm)
 
-    # ═══════════════════════════════════════════════════════════════
-    # BALÓN PARADO
-    # ═══════════════════════════════════════════════════════════════
-
     def _dead_ball(self, wm):
         is_our_ball = (
             (wm.play_mode.endswith("_l") and wm.side == "l") or
@@ -87,14 +79,16 @@ class AgentFSM:
             if wm.ball_kickable:
                 self.state = "DEADBALL_KICK"
                 return self._deadball_kick(wm)
-            else:
-                i_am_chaser = self.coord.elect_chaser(
-                    self.unum, wm.ball_pos, self.role)
-                if i_am_chaser and self.role != "goalkeeper":
-                    self.state = "CHASE"
-                    return self._chase(wm)
-                self.state = "OPEN"
-                return self._move_to(self._open_position(wm), wm)
+            # Solo el más cercano va al balón, los demás van a home
+            i_am_chaser = self.coord.elect_chaser(
+                self.unum, wm.ball_pos, self.role)
+            if i_am_chaser and self.role != "goalkeeper":
+                self.state = "CHASE"
+                return self._chase(wm)
+            # Los demás van a posición home, no OPEN
+            self.state = "SUPPORT"
+            home = self.rm.get_home_position(self.unum)
+            return self._move_to(home, wm)
         else:
             self.state = "DEFEND_DEAD"
             home = self.rm.get_home_position(self.unum)
@@ -138,13 +132,18 @@ class AgentFSM:
             ty = min(-2.0, max(-30.0, by - 6.0))
         return (tx, ty)
 
-    # ═══════════════════════════════════════════════════════════════
-    # ROLES
-    # ═══════════════════════════════════════════════════════════════
-
     def _goalkeeper(self, wm):
         if wm.ball_kickable:
             self.state = "CLEAR"
+            tm = _best_teammate(wm)
+            if tm:
+                tx, ty, dist, _ = tm
+                bx = wm.ball_pos[0] if wm.ball_pos else 0
+                by = wm.ball_pos[1] if wm.ball_pos else 0
+                abs_a = math.degrees(math.atan2(ty - by, tx - bx))
+                rel_a = self._rel_angle(abs_a, wm.self_angle)
+                power = min(85.0, max(50.0, dist * 3.0))
+                return {"kick": (power, rel_a)}
             side_angle = 35.0 if (wm.ball_pos and wm.ball_pos[1] >= 0) else -35.0
             return {"kick": (85.0, side_angle)}
         in_own_area = wm.ball_pos and wm.ball_pos[0] < -38.0
@@ -173,72 +172,47 @@ class AgentFSM:
                 return {"kick": (power, rel_a)}
             side = 20.0 if (wm.ball_pos and wm.ball_pos[1] >= 0) else -20.0
             return {"kick": (85.0, side)}
-
         i_am_chaser = self.coord.elect_chaser(self.unum, wm.ball_pos, self.role)
         if i_am_chaser:
             self.state = "CHASE"
             return self._chase(wm)
-
-        # Solo posicionarse si ve el balón
-        if wm.ball_pos is not None and wm.ball_dist < 60.0:
-            self.state = "SUPPORT"
-            home = self.rm.get_home_position(self.unum)
+        self.state = "SUPPORT"
+        home = self.rm.get_home_position(self.unum)
+        if wm.ball_pos:
             bx, by = wm.ball_pos
             zx = max(self.OWN_GOAL_X + 3, min(0.0,
                  home[0] * 0.7 + bx * 0.3))
             zy = max(-30.0, min(30.0, home[1] * 0.6 + by * 0.4))
-            return self._move_to((zx, zy), wm)
-
-        # Sin ver el balón — girar buscándolo
-        self.state = "SEARCH"
-        return {"turn": 30.0, "dash": 20.0}
+        else:
+            zx, zy = home
+        return self._move_to((zx, zy), wm)
 
     def _midfielder(self, wm):
         if wm.ball_kickable:
-            action, utils = best_action(wm)
+            action, _ = best_action(wm)
             self.state = action
             return self._execute_action(action, wm)
-
         i_am_chaser = self.coord.elect_chaser(self.unum, wm.ball_pos, self.role)
         if i_am_chaser:
             self.state = "CHASE"
             return self._chase(wm)
-
-        # Solo ir a soporte si ve el balón
-        if wm.ball_pos is not None and wm.ball_dist < 60.0:
-            self.state = "SUPPORT"
-            home   = self.rm.get_home_position(self.unum)
-            target = self.coord.get_support_positions(
-                self.unum, wm.ball_pos, home, wm.side)
-            return self._move_to(target, wm)
-
-        # Sin ver el balón — girar buscándolo
-        self.state = "SEARCH"
-        return {"turn": 30.0, "dash": 20.0}
+        self.state = "SUPPORT"
+        home   = self.rm.get_home_position(self.unum)
+        target = self.coord.get_support_positions(
+            self.unum, wm.ball_pos, home, wm.side)
+        return self._move_to(target, wm)
 
     def _forward(self, wm):
         if wm.ball_kickable:
-            action, utils = best_action(wm)
+            action, _ = best_action(wm)
             self.state = action
             return self._execute_action(action, wm)
-
         i_am_chaser = self.coord.elect_chaser(self.unum, wm.ball_pos, self.role)
         if i_am_chaser:
             self.state = "CHASE"
             return self._chase(wm)
-
-        # Solo correr en profundidad si ve el balón
-        if wm.ball_pos is not None and wm.ball_dist < 50.0:
-            self.state = "RUN"
-            return self._move_to(self._run_depth(wm), wm)
-
-        # Sin ver el balón — girar buscándolo
-        self.state = "SEARCH"
-        return {"turn": 30.0, "dash": 20.0}
-
-    # ═══════════════════════════════════════════════════════════════
-    # EJECUTOR DE ACCIONES
-    # ═══════════════════════════════════════════════════════════════
+        self.state = "RUN"
+        return self._move_to(self._run_depth(wm), wm)
 
     def _execute_action(self, action, wm):
         if action == "PASS":
@@ -250,17 +224,27 @@ class AgentFSM:
         else:
             return self._dribble_forward(wm)
 
-    # ═══════════════════════════════════════════════════════════════
-    # ACCIONES DE BALÓN
-    # ═══════════════════════════════════════════════════════════════
-
     def _chase(self, wm):
         angle = wm.ball_angle
+        dist  = wm.ball_dist
+        if dist < 2.0:
+            power = 30.0
+        elif dist < 5.0:
+            power = 60.0
+        elif dist < 15.0:
+            power = 85.0
+        else:
+            power = self.rm.get_dash_base(self.unum)
+        if wm.stamina_pct < 0.4:
+            power *= 0.6
+        elif wm.stamina_pct < 0.6:
+            power *= 0.8
         if abs(angle) < 5.0:
-            return {"turn": 0.0, "dash": self.rm.get_dash_base(self.unum)}
-        turn  = self._smooth_turn(angle, 60.0)
-        power = max(60.0, self._dash_power(wm, abs(angle)))
-        return {"turn": turn, "dash": power}
+            return {"turn": 0.0, "dash": round(power, 1)}
+        if abs(angle) > 30:
+            power *= 0.5
+        turn = self._smooth_turn(angle, 60.0)
+        return {"turn": turn, "dash": round(power, 1)}
 
     def _shoot(self, wm):
         bx = wm.ball_pos[0] if wm.ball_pos else 0
@@ -285,19 +269,19 @@ class AgentFSM:
         by = wm.ball_pos[1] if wm.ball_pos else 0
         abs_angle = math.degrees(math.atan2(self.GOAL_Y - by, self.GOAL_X - bx))
         rel_angle = self._rel_angle(abs_angle, wm.self_angle)
-        return {"kick": (35.0, rel_angle), "dash": 80.0}
+        return {"kick": (20.0, rel_angle), "dash": 70.0}
 
     def _dribble_away(self, wm):
         if not wm.opponents or not wm.ball_pos:
             return self._dribble_forward(wm)
         closest   = min(wm.opponents, key=lambda o: o.get("dist", 999))
         opp_angle = closest.get("angle", 0)
-        escape    = opp_angle + 180 + self._jitter() * 5
+        escape    = opp_angle + 90 + self._jitter() * 8
         bx, by    = wm.ball_pos
         goal_abs  = math.degrees(math.atan2(self.GOAL_Y - by, self.GOAL_X - bx))
         goal_rel  = self._rel_angle(goal_abs, wm.self_angle)
-        final     = goal_rel * 0.6 + escape * 0.4
-        return {"kick": (30.0, final), "dash": 90.0}
+        final     = goal_rel * 0.5 + escape * 0.5
+        return {"kick": (25.0, final), "dash": 80.0}
 
     def _go_home(self, wm):
         return {"move": self.rm.get_home_position(self.unum)}
@@ -316,18 +300,16 @@ class AgentFSM:
         abs_angle = math.degrees(math.atan2(ty - sy, tx - sx))
         rel_angle = self._rel_angle(abs_angle, wm.self_angle)
         turn  = self._smooth_turn(rel_angle, 35.0)
-        power = self._dash_power(wm, abs(rel_angle))
-        return {"turn": turn, "dash": power}
+        power = min(100.0, max(30.0, dist * 8.0))
+        if wm.stamina_pct < 0.4:
+            power *= 0.6
+        return {"turn": turn, "dash": round(power, 1)}
 
     def _run_depth(self, wm):
         home = self.rm.get_home_position(self.unum)
         if wm.ball_pos:
             return (max(home[0], min(45.0, wm.ball_pos[0] + 10.0)), home[1])
         return home
-
-    # ═══════════════════════════════════════════════════════════════
-    # UTILIDADES
-    # ═══════════════════════════════════════════════════════════════
 
     def _rel_angle(self, abs_angle, self_angle):
         diff = abs_angle - self_angle

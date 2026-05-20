@@ -18,17 +18,15 @@ def _opp_pressure(wm, radius=5.0):
 def _best_teammate(wm):
     if not wm.teammates or not wm.ball_pos:
         return None
-    bx, by = wm.ball_pos
+    bx, by     = wm.ball_pos
     best       = None
     best_score = -999.0
     for tm in wm.teammates:
         dist = tm.get("dist", 999)
-        if dist < 1.5 or dist > 35.0:
+        if dist < 2.0 or dist > 35.0:
             continue
-        tx, ty = _teammate_abs_pos(wm, tm)
+        tx, ty   = _teammate_abs_pos(wm, tm)
         adelanto = tx - bx
-
-        # Contar rivales cerca del receptor
         opp_cerca = 0
         for o in wm.opponents:
             abs_a = wm.self_angle + o.get("angle", 0)
@@ -36,19 +34,16 @@ def _best_teammate(wm):
             oy = wm.self_pos[1] + o["dist"] * math.sin(math.radians(abs_a))
             if math.hypot(ox - tx, oy - ty) < 3.0:
                 opp_cerca += 1
-
-        # Score: adelanto cuenta mucho, distancia moderada, rivales penalizan
-        score = (adelanto * 0.6) - (dist * 0.05) - (opp_cerca * 6.0)
+        score = (adelanto * 0.5) - (dist * 0.05) - (opp_cerca * 5.0)
         if score > best_score:
             best_score = score
-            best = (tx, ty, dist, score)
-
-    return best if best_score > -8.0 else None
+            best       = (tx, ty, dist, score)
+    return best if best_score > -4.0 else None
 
 
 def compute_utilities(wm):
     if not wm.ball_pos:
-        return {"DRIBBLE_FWD": 0.0}
+        return {"DRIBBLE_FWD": 1.0}
 
     bx, by   = wm.ball_pos
     pressure = _opp_pressure(wm, radius=6.0)
@@ -56,33 +51,34 @@ def compute_utilities(wm):
     utilities = {}
 
     # ── PASS ──────────────────────────────────────────────────────
+    # Pasar cuando hay presión moderada O compañero adelantado libre
     if tm_best:
         tx, ty, tm_dist, tm_score = tm_best
-        # PASS es la acción base — siempre tiene alta utilidad si hay compañero
+        adelanto = tx - bx
         u_pass = (
-            6.0                          # base alta — pasar es preferido
-            + tm_score * 0.4             # calidad del compañero
-            + pressure * 4.0             # bajo presión pasar es urgente
-            - (1.0 if tm_dist < 3.0 else 0.0)  # no pasar a quien está muy cerca
+            2.0                      # base moderada
+            + pressure * 4.0        # urgente bajo presión
+            + adelanto * 0.25        # bonus compañero adelantado
+            - tm_dist * 0.08        # leve penalización por distancia
         )
         utilities["PASS"] = round(u_pass, 3)
     else:
         utilities["PASS"] = -5.0
 
     # ── DRIBBLE_FWD ───────────────────────────────────────────────
-    # Solo bueno cuando no hay presión Y no hay compañero claro adelante
+    # Driblar cuando no hay presión — avanzar con el balón
     u_drib_fwd = (
-        (1.0 - pressure) * 3.0
-        + (bx / 52.5) * 1.0
-        - (3.0 if tm_best and tm_best[3] > 0 else 0.0)  # penalizar si hay pase
+        2.0                          # base igual que PASS
+        + (1.0 - pressure) * 2.5    # mejor sin presión
+        + (bx / 52.5) * 1.0         # mejor cuanto más adelante
     )
     utilities["DRIBBLE_FWD"] = round(u_drib_fwd, 3)
 
     # ── DRIBBLE_ESC ───────────────────────────────────────────────
-    # Solo cuando hay mucha presión y no hay compañero libre
+    # Escapar solo cuando hay mucha presión y no hay pase claro
     u_drib_esc = (
         pressure * 4.0
-        - (4.0 if tm_best else 0.0)   # si hay compañero, pasar es mejor
+        - (2.0 if tm_best else 0.0)
         + 0.5
     )
     utilities["DRIBBLE_ESC"] = round(u_drib_esc, 3)

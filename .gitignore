@@ -1,7 +1,23 @@
+# Logs
+logs/
+*.log
+
+# Modelos PPO
+models/
+
+# Python
 __pycache__/
-*.py[cod]
-.venv/
-venv/
-logs/*.log
-.DS_Store
-build/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Archivos temporales
+*.tmp
+*.bak
+*.swp
+*~
+
+# Tabla Q (se regenera entrenando)
+logs/qtable*.json
