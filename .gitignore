@@ -1,23 +1,23 @@
-# Logs
+# Logs de juego
 logs/
 *.log
+
+# Replays del servidor RoboCup
+*.rcg
+*.rcl
 
 # Modelos PPO
 models/
 
-# Python
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
 *.egg-info/
 
-# Archivos temporales
+# Temporales
 *.tmp
 *.bak
 *.swp
 *~
-
-# Tabla Q (se regenera entrenando)
-logs/qtable*.json
