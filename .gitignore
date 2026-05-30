@@ -21,3 +21,4 @@ __pycache__/
 *.bak
 *.swp
 *~
+agent/navigation_astar.py
