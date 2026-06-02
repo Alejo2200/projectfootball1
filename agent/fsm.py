@@ -19,6 +19,12 @@ class AgentFSM:
         "free_kick_fault_l", "free_kick_fault_r",
     )
 
+    GOAL_MODES = (
+        "goal_l", "goal_r",
+        "goal_l_1", "goal_r_1",
+        "goal_l_2", "goal_r_2",
+    )
+
     def __init__(self, unum, role, role_manager, team_name="team"):
         self.unum      = unum
         self.role      = role
@@ -44,6 +50,10 @@ class AgentFSM:
             self.state = "WAIT"
             return self._go_home(wm)
 
+        if wm.play_mode in self.GOAL_MODES:
+            self.state = "WAIT"
+            return self._go_home(wm)
+
         if wm.play_mode in ("kick_off_l", "kick_off_r"):
             if self.unum == 11:
                 if wm.ball_kickable:
@@ -57,6 +67,9 @@ class AgentFSM:
             return self._dead_ball(wm)
 
         if wm.ball_pos is None or wm.ball_dist > 990:
+            if self.state == "CHASE" and abs(wm.ball_angle) < 180:
+                return {"turn": self._smooth_turn(wm.ball_angle, 30.0),
+                        "dash": 60.0}
             self.state = "SEARCH"
             return {"turn": 45.0, "dash": 0.0}
 
@@ -79,13 +92,11 @@ class AgentFSM:
             if wm.ball_kickable:
                 self.state = "DEADBALL_KICK"
                 return self._deadball_kick(wm)
-            # Solo el más cercano va al balón, los demás van a home
             i_am_chaser = self.coord.elect_chaser(
                 self.unum, wm.ball_pos, self.role)
             if i_am_chaser and self.role != "goalkeeper":
                 self.state = "CHASE"
                 return self._chase(wm)
-            # Los demás van a posición home, no OPEN
             self.state = "SUPPORT"
             home = self.rm.get_home_position(self.unum)
             return self._move_to(home, wm)
@@ -119,19 +130,6 @@ class AgentFSM:
         final    = goal_rel * 0.6 + lateral * 0.4
         return {"kick": (70.0, final)}
 
-    def _open_position(self, wm):
-        home = self.rm.get_home_position(self.unum)
-        if not wm.ball_pos:
-            return home
-        bx, by = wm.ball_pos
-        hx, hy = home
-        tx = max(hx, min(50.0, bx + 8.0))
-        if hy >= 0:
-            ty = max(2.0, min(30.0, by + 6.0))
-        else:
-            ty = min(-2.0, max(-30.0, by - 6.0))
-        return (tx, ty)
-
     def _goalkeeper(self, wm):
         if wm.ball_kickable:
             self.state = "CLEAR"
@@ -146,17 +144,23 @@ class AgentFSM:
                 return {"kick": (power, rel_a)}
             side_angle = 35.0 if (wm.ball_pos and wm.ball_pos[1] >= 0) else -35.0
             return {"kick": (85.0, side_angle)}
-        in_own_area = wm.ball_pos and wm.ball_pos[0] < -38.0
-        if in_own_area and wm.ball_dist < 15.0:
+        if wm.ball_dist < 20.0:
             self.state = "CHASE"
             return self._chase(wm)
         self.state = "POSITION"
-        gk_x = max(-50.0, min(-42.0,
-               self.OWN_GOAL_X + 0.3 * (wm.ball_pos[0] - self.OWN_GOAL_X)
-               if wm.ball_pos else -50.0))
-        gk_y = max(-6.0, min(6.0,
-               wm.ball_pos[1] * 0.2 if wm.ball_pos else 0.0))
-        return self._move_to((gk_x, gk_y), wm)
+        if wm.ball_pos:
+            by   = wm.ball_pos[1]
+            gk_y = max(-6.0, min(6.0, by * 0.3))
+        else:
+            gk_y = 0.0
+        gk_x       = -48.0
+        target_abs = math.degrees(math.atan2(
+            gk_y - wm.self_pos[1], gk_x - wm.self_pos[0]))
+        rel    = self._rel_angle(target_abs, wm.self_angle)
+        turn   = self._smooth_turn(rel, 35.0)
+        dist_t = math.hypot(gk_x - wm.self_pos[0], gk_y - wm.self_pos[1])
+        power  = min(60.0, max(20.0, dist_t * 5.0))
+        return {"turn": turn, "dash": round(power, 1)}
 
     def _defender(self, wm):
         if wm.ball_kickable:
@@ -196,6 +200,10 @@ class AgentFSM:
         if i_am_chaser:
             self.state = "CHASE"
             return self._chase(wm)
+        # Midfielder va al balón si está cerca
+        if wm.ball_dist < 20.0:
+            self.state = "CHASE"
+            return self._chase(wm)
         self.state = "SUPPORT"
         home   = self.rm.get_home_position(self.unum)
         target = self.coord.get_support_positions(
@@ -209,6 +217,10 @@ class AgentFSM:
             return self._execute_action(action, wm)
         i_am_chaser = self.coord.elect_chaser(self.unum, wm.ball_pos, self.role)
         if i_am_chaser:
+            self.state = "CHASE"
+            return self._chase(wm)
+        # Forward va al balón si está visible y cerca
+        if wm.ball_dist < 40.0:
             self.state = "CHASE"
             return self._chase(wm)
         self.state = "RUN"

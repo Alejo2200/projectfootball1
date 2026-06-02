@@ -13,7 +13,7 @@ class TeamCoordinator:
 
     def update(self, unum, self_pos, ball_pos, ball_kickable, ball_dist=9999):
         with self._lock:
-            self._tick       += 1
+            self._tick           += 1
             self.positions[unum]  = self_pos
             self.ball_dists[unum] = ball_dist
             if ball_kickable:
@@ -30,64 +30,39 @@ class TeamCoordinator:
             for other_unum, other_dist in self.ball_dists.items():
                 if other_unum == unum:
                     continue
-                if other_dist < my_dist - 2.0:
+                # Margen de 4m — más jugadores pueden ser chaser
+                if other_dist < my_dist - 4.0:
                     return False
             self.ball_chaser = unum
             return True
 
     def get_support_positions(self, unum, ball_pos, home_pos, side):
-        """
-        Posición de apoyo inteligente:
-        - Formar triángulos alrededor del balón
-        - Moverse a recibir, no esperar
-        - Mantener separación entre compañeros
-        """
         if ball_pos is None:
             return home_pos
-
         bx, by = ball_pos
         hx, hy = home_pos
-
-        # Offset base hacia el balón
-        dx = bx - hx
-        dy = by - hy
-        dist_to_ball = math.hypot(dx, dy)
-
-        if dist_to_ball < 0.1:
+        dx   = bx - hx
+        dy   = by - hy
+        dist = math.hypot(dx, dy)
+        if dist < 0.1:
             return home_pos
-
-        # Moverse hasta 60% del camino hacia el balón
-        # pero mantener la estructura del equipo
-        factor = min(0.6, 15.0 / max(dist_to_ball, 1.0))
+        factor = min(0.4, 12.0 / max(dist, 1.0))
         tx = hx + dx * factor
         ty = hy + dy * factor
-
-        # Separación lateral para triángulos
-        # Jugadores arriba del eje van más arriba, abajo van más abajo
-        # Esto crea ángulos de pase naturales
-        if hy > 1.0:
-            ty += 3.0   # abrirse hacia arriba
-        elif hy < -1.0:
-            ty -= 3.0   # abrirse hacia abajo
-
-        # Evitar amontonarse — separación mínima de otros jugadores
+        if hy > 2.0:
+            ty += 4.0
+        elif hy < -2.0:
+            ty -= 4.0
         with self._lock:
             for other_unum, other_pos in self.positions.items():
                 if other_unum == unum:
                     continue
                 sep = math.hypot(other_pos[0] - tx, other_pos[1] - ty)
-                if sep < 5.0:
-                    # Alejarse lateralmente del compañero
+                if sep < 6.0:
                     if other_pos[1] > ty:
-                        ty -= 3.0
+                        ty -= 4.0
                     else:
-                        ty += 3.0
-
-        # Respetar zona del rol — no salir demasiado de casa
-        tx = hx + (tx - hx) * 0.8
-        ty = hy + (ty - hy) * 0.8
-
-        # Límites del campo
+                        ty += 4.0
         tx = max(-51.0, min(51.0, tx))
         ty = max(-32.0, min(32.0, ty))
         return (tx, ty)

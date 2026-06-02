@@ -51,31 +51,28 @@ def compute_utilities(wm):
     utilities = {}
 
     # ── PASS ──────────────────────────────────────────────────────
-    # Pasar cuando hay presión moderada O compañero adelantado libre
     if tm_best:
         tx, ty, tm_dist, tm_score = tm_best
         adelanto = tx - bx
         u_pass = (
-            2.0                      # base moderada
-            + pressure * 4.0        # urgente bajo presión
-            + adelanto * 0.25        # bonus compañero adelantado
-            - tm_dist * 0.08        # leve penalización por distancia
+            4.0
+            + pressure * 4.0
+            + adelanto * 0.3
+            - tm_dist * 0.05
         )
         utilities["PASS"] = round(u_pass, 3)
     else:
         utilities["PASS"] = -5.0
 
     # ── DRIBBLE_FWD ───────────────────────────────────────────────
-    # Driblar cuando no hay presión — avanzar con el balón
     u_drib_fwd = (
-        2.0                          # base igual que PASS
-        + (1.0 - pressure) * 2.5    # mejor sin presión
-        + (bx / 52.5) * 1.0         # mejor cuanto más adelante
+        1.5
+        + (1.0 - pressure) * 2.0
+        + (bx / 52.5) * 1.0
     )
     utilities["DRIBBLE_FWD"] = round(u_drib_fwd, 3)
 
     # ── DRIBBLE_ESC ───────────────────────────────────────────────
-    # Escapar solo cuando hay mucha presión y no hay pase claro
     u_drib_esc = (
         pressure * 4.0
         - (2.0 if tm_best else 0.0)
